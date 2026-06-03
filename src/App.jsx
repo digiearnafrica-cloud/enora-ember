@@ -1,12 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { db, storage, auth } from './firebase.js';
+import { db, auth } from './firebase.js';
 import {
   collection, onSnapshot, doc,
   addDoc, updateDoc, deleteDoc, serverTimestamp,
 } from 'firebase/firestore';
-import {
-  ref as sRef, uploadBytes, getDownloadURL, deleteObject,
-} from 'firebase/storage';
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged,
 } from 'firebase/auth';
@@ -65,11 +62,18 @@ const compressToBlob = (file, maxW = 700, q = 0.80) =>
     reader.readAsDataURL(file);
   });
 
-const uploadImg = async (file, id) => {
+const uploadImg = async (file) => {
   const blob = await compressToBlob(file);
-  const ref  = sRef(storage, `products/${id}.jpg`);
-  await uploadBytes(ref, blob, { contentType: 'image/jpeg' });
-  return getDownloadURL(ref);
+  const formData = new FormData();
+  formData.append('file', blob, 'product.jpg');
+  formData.append('upload_preset', import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET);
+  const res = await fetch(
+    `https://api.cloudinary.com/v1_1/${import.meta.env.VITE_CLOUDINARY_CLOUD_NAME}/image/upload`,
+    { method: 'POST', body: formData }
+  );
+  if (!res.ok) throw new Error('Image upload failed');
+  const data = await res.json();
+  return data.secure_url;
 };
 
 const emptyForm = () => ({ name: '', category: 'earrings', price: '', emoji: '💎', description: '' });
@@ -223,7 +227,7 @@ export default function App() {
       if (editProd) {
         await updateDoc(doc(db, 'products', editProd.id), data);
         if (imgFile) {
-          const url = await uploadImg(imgFile, editProd.id);
+          const url = await uploadImg(imgFile);
           await updateDoc(doc(db, 'products', editProd.id), { imageUrl: url });
         }
         toast$('Product updated ✓');
@@ -231,7 +235,7 @@ export default function App() {
         data.createdAt = serverTimestamp();
         const ref = await addDoc(collection(db, 'products'), data);
         if (imgFile) {
-          const url = await uploadImg(imgFile, ref.id);
+          const url = await uploadImg(imgFile);
           await updateDoc(ref, { imageUrl: url });
         }
         toast$('Product added ✓');
@@ -250,7 +254,7 @@ export default function App() {
     try {
       await deleteDoc(doc(db, 'products', id));
       if (imageUrl) {
-        try { await deleteObject(sRef(storage, `products/${id}.jpg`)); } catch {}
+      // image hosted on Cloudinary — no server-side delete needed
       }
       toast$('Product deleted');
     } catch { toast$('Error deleting product', 'err'); }
@@ -648,4 +652,4 @@ function adminBtn(B, FJ, danger = false) {
     borderRadius: '8px', padding: '7px 12px',
     fontFamily: FJ, fontSize: '11px', cursor: 'pointer',
   };
-}
+      }
